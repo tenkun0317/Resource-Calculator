@@ -129,7 +129,7 @@ def process_input(input_str: str) -> Union[Tuple[Dict[str, float], Dict[str, Dic
 
 def main() -> None:
     while True:
-        user_input = input("Enter items and quantities (e.g., 'Circuit, 5; Gold Wire, 2') or 'quit' to exit: ").strip()
+        user_input = input("Enter items and quantities (e.g., 'Iron, 5; Gold, 2') or 'quit' to exit: ").strip()
         if user_input.lower() == 'quit':
             break
 
