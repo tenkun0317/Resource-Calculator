@@ -27,7 +27,7 @@ resources = {
 - First element of the tuple: a dictionary of input materials needed to create the product.
 - Second element of the tuple: a dictionary representing the output product to be created.
 
-For example, in the case of `Wooden Pickaxe`, the product name is `Wooden Pickaxe`, the input materials are three `Planks` and two `Sticks`, and the output product is one `Wooden Pickaxe`.
+For example, in the case of `Wooden Pickaxe`, the product name is `Wooden Pickaxe`, the input materials are three `Planks` and two `Stick`, and the output product is one `Wooden Pickaxe`.
 You may have any number of both inputs and outputs.
 
 ## Features to be added
