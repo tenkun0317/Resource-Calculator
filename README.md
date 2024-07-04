@@ -30,5 +30,7 @@ resources = {
 For example, in the case of `Wooden Pickaxe`, the product name is `Wooden Pickaxe`, the input materials are three `Planks` and two `Stick`, and the output product is one `Wooden Pickaxe`.
 You may have any number of both inputs and outputs.
 
+Preferably, the product name and the first output product should be the same.
+
 ## Features to be added
 - Reverse lookup from finished product
