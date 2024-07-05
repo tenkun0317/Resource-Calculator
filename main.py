@@ -88,12 +88,11 @@ def calculate_resources(items: List[Tuple[str, float]]) -> Tuple[Dict[str, float
                 if len(routes) > 1:
                     indent -= 1
 
-            if len(routes) > 1:
-                indent -= 1
-
             best_route = min(all_route_results, key=lambda x: x[0])
             best_route_index = all_route_results.index(best_route)
-            print("  " * indent + f"Best route: {best_route_index + 1} of {len(routes)}")
+            if len(routes) > 1:
+                indent -= 1
+                print("  " * indent + f"Best route: {best_route_index + 1} of {len(routes)}")
 
             _, inputs, outputs, byproducts, available_resources = best_route
 
