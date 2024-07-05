@@ -63,7 +63,7 @@ def calculate_resources(items: List[Tuple[str, float]]) -> Tuple[Dict[str, float
                         route_outputs[output_item] += qty
                         excess = produced_qty - qty
                         if excess > 0:
-                            route_outputs[output_item] += excess
+                            route_byproducts[output_item] += excess
                             route_available_resources[output_item] += excess
                             print("  " * (indent + 1) + f"Added excess {output_item} to available resources: {excess:.2f}")
 
@@ -75,7 +75,8 @@ def calculate_resources(items: List[Tuple[str, float]]) -> Tuple[Dict[str, float
                     if sum(route_outputs.values()) > 0:
                         print("  " * indent + "Route outputs:")
                         for resource, amount in route_outputs.items():
-                            print("  " * (indent + 1) + f"{resource}: {amount:.2f}")
+                            if (resource, amount) not in route_inputs.items():
+                                print("  " * (indent + 1) + f"{resource}: {amount:.2f}")
                     if sum(route_byproducts.values()) > 0:
                         print("  " * indent + "Route byproducts:")
                         for resource, amount in route_byproducts.items():
