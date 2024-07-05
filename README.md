@@ -39,5 +39,7 @@ You may have any number of both inputs and outputs.
 Preferably, the product name and the first output product should be the same.
 
 ## Features to be added
-- Reverse lookup from finished product
+- Display of possible productions from the name and number of resources
+- Display list of recipes from resources
+- Display list of recipes for products
 - Optional recipe tree file output
