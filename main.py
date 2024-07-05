@@ -10,47 +10,83 @@ def calculate_resources(items: List[Tuple[str, float]]) -> Tuple[Dict[str, float
 
     def recurse(item: str, qty: float, path: int = 0) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float]]:
         nonlocal indent, available_resources
-        print("  " * indent + f"Calculating for {item} x {qty:.2f} (Path {path + 1})")
+        print("  " * indent + f"Calculating for {item} x {qty:.2f}")
         indent += 1
         inputs = defaultdict(float)
         outputs = defaultdict(float)
         byproducts = defaultdict(float)
 
         if item in resources:
-            recipe_inputs, recipe_outputs = resources[item][path]
-            scale_factor = ceil(qty / recipe_outputs[item])
+            routes = resources[item]
+            print("  " * indent + f"Found recipe for {item} in {len(routes)} routes")
 
-            for input_item, input_qty in recipe_inputs.items():
-                required_qty = input_qty * scale_factor
-                if available_resources[input_item] >= required_qty:
-                    available_resources[input_item] -= required_qty
-                    print("  " * indent + f"Using available {input_item}: {required_qty:.2f}")
-                else:
-                    additional_qty = required_qty - available_resources[input_item]
-                    available_resources[input_item] = 0
-                    sub_inputs, sub_outputs, sub_byproducts = recurse(input_item, additional_qty)
-                    for resource, amount in sub_inputs.items():
-                        inputs[resource] += amount
-                    for resource, amount in sub_outputs.items():
-                        outputs[resource] += amount
-                        print("  " * indent + f"Added intermediate resource {resource}: {amount:.2f}")
-                    for resource, amount in sub_byproducts.items():
-                        byproducts[resource] += amount
-                        print("  " * indent + f"Added byproduct resource {resource}: {amount:.2f}")
+            best_route = None
+            best_route_score = float("inf")
+            best_route_results = None
 
-            for output_item, output_qty in recipe_outputs.items():
-                produced_qty = output_qty * scale_factor
-                if output_item != item:
-                    byproducts[output_item] += produced_qty
-                    available_resources[output_item] += produced_qty
-                else:
-                    outputs[output_item] += qty
-                    excess = produced_qty - qty
-                    if excess > 0:
-                        outputs[output_item] += excess
-                        available_resources[output_item] += excess
-                        print("  " * indent + f"Added excess {output_item} to available resources: {excess:.2f}")
+            for path, (recipe_inputs, recipe_outputs) in enumerate(routes):
+                print("  " * (indent + 1) + f"Route {path + 1} of {len(routes)}")
+                route_inputs = defaultdict(float)
+                route_outputs = defaultdict(float)
+                route_byproducts = defaultdict(float)
+                sub_routes = 0
+
+                scale_factor = ceil(qty / recipe_outputs[item])
+
+                for input_item, input_qty in recipe_inputs.items():
+                    required_qty = input_qty * scale_factor
+                    if available_resources[input_item] >= required_qty:
+                        available_resources[input_item] -= required_qty
+                        print("  " * (indent + 1) + f"Using available {input_item}: {required_qty:.2f}")
+                    else:
+                        additional_qty = required_qty - available_resources[input_item]
+                        available_resources[input_item] = 0
+                        sub_inputs, sub_outputs, sub_byproducts = recurse(input_item, additional_qty)
+                        sub_routes += 1
+                        for resource, amount in sub_inputs.items():
+                            route_inputs[resource] += amount
+                        for resource, amount in sub_outputs.items():
+                            route_outputs[resource] += amount
+                            print("  " * (indent + 1) + f"Added intermediate resource {resource}: {amount:.2f}")
+                        for resource, amount in sub_byproducts.items():
+                            route_byproducts[resource] += amount
+                            print("  " * (indent + 1) + f"Added byproduct resource {resource}: {amount:.2f}")
+
+                for output_item, output_qty in recipe_outputs.items():
+                    produced_qty = output_qty * scale_factor
+                    if output_item != item:
+                        route_byproducts[output_item] += produced_qty
+                        available_resources[output_item] += produced_qty
+                    else:
+                        route_outputs[output_item] += qty
+                        excess = produced_qty - qty
+                        if excess > 0:
+                            route_outputs[output_item] += excess
+                            available_resources[output_item] += excess
+                            print("  " * (indent + 1) + f"Added excess {output_item} to available resources: {excess:.2f}")
+
+                print("  " * (indent + 1) + "Route inputs:")
+                for resource, amount in route_inputs.items():
+                    print("  " * (indent + 2) + f"{resource}: {amount:.2f}")
+                print("  " * (indent + 1) + "Route outputs:")
+                for resource, amount in route_outputs.items():
+                    print("  " * (indent + 2) + f"{resource}: {amount:.2f}")
+                print("  " * (indent + 1) + "Route byproducts:")
+                for resource, amount in route_byproducts.items():
+                    print("  " * (indent + 2) + f"{resource}: {amount:.2f}")
+
+                route_score = (len(route_inputs) * 1000) + sub_routes
+                if route_score < best_route_score:
+                    best_route = path
+                    best_route_score = route_score
+                    best_route_results = (route_inputs, route_outputs, route_byproducts)
+
+            print("  " * indent + f"Best route: {best_route + 1} of {len(routes)}")
+            inputs, outputs, byproducts = best_route_results
         else:
+            inputs = defaultdict(float)
+            outputs = defaultdict(float)
+            byproducts = defaultdict(float)
             inputs[item] += qty
             outputs[item] += qty
             print("  " * indent + f"Added basic resource {item}: {qty:.2f}")
