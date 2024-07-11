@@ -163,11 +163,11 @@ def fuzzy_match_item(item: str, all_items: List[str]) -> Union[str, None]:
 
 def get_all_items() -> List[str]:
     all_items = set()
-    for item in resources:
+    for item, routes in resources.items():
         all_items.add(item)
-        for route in resources[item]:
-            for output in route[1]:
-                all_items.add(output)
+        for recipe_inputs, recipe_outputs in routes:
+            all_items.update(recipe_inputs.keys())
+            all_items.update(recipe_outputs.keys())
     return list(all_items)
 
 def process_input(input_str: str) -> Union[Tuple[Dict[str, float], Dict[str, Dict[str, float]]], str]:
