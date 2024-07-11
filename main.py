@@ -2,6 +2,7 @@ from math import ceil
 from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Union, List, Tuple
+from difflib import get_close_matches
 
 from resources import resources as resources
 
@@ -156,8 +157,22 @@ def categorize_products(inputs: Dict[str, float], outputs: Dict[str, float], byp
 
     return categories
 
+def fuzzy_match_item(item: str, all_items: List[str]) -> Union[str, None]:
+    matches = get_close_matches(item.lower(), [i.lower() for i in all_items], n=1, cutoff=0.8)
+    return all_items[[i.lower() for i in all_items].index(matches[0])] if matches else None
+
+def get_all_items() -> List[str]:
+    all_items = set()
+    for item in resources:
+        all_items.add(item)
+        for route in resources[item]:
+            for output in route[1]:
+                all_items.add(output)
+    return list(all_items)
+
 def process_input(input_str: str) -> Union[Tuple[Dict[str, float], Dict[str, Dict[str, float]]], str]:
-    #try:
+    all_items = get_all_items()
+    try:
         items = []
         for item_input in input_str.split(';'):
             item, number_str = item_input.rsplit(",", 1)
@@ -165,16 +180,27 @@ def process_input(input_str: str) -> Union[Tuple[Dict[str, float], Dict[str, Dic
             number = float(number_str)
             if number <= 0:
                 raise ValueError(f"Quantity must be positive for {item}")
-            if item not in resources and item not in set(resource for res in resources for res in resources[res] for outputs in res for resource in outputs):
-                raise ValueError(f"Unknown item: {item}")
+
+            if item not in all_items:
+                matched_item = fuzzy_match_item(item, all_items)
+                if matched_item:
+                    user_input = input(f"'{item}' not found. Did you mean '{matched_item}'? (yes/no): ").strip().lower()
+                    if user_input == 'yes' or user_input == 'y':
+                        item = matched_item
+                    else:
+                        return f"Item '{item}' not found. Please check the spelling and try again."
+                else:
+                    return f"Item '{item}' not found and no close matches were found. Please check the spelling and try again."
+
             items.append((item, number))
+
         inputs, outputs, byproducts = calculate_resources(items)
         categories = categorize_products(inputs, outputs, byproducts, [item for item, _ in items])
         return inputs, categories
-    #except ValueError as e:
-    #    return f"Error: {str(e)}"
-    #except Exception as e:
-    #    return f"An unexpected error occurred: {str(e)}"
+    except ValueError as e:
+        return f"Error: {str(e)}"
+    except Exception as e:
+        return f"An unexpected error occurred: {str(e)}"
 
 def main() -> None:
     while True:
