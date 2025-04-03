@@ -1,4 +1,4 @@
-# Resource-Calculater
+# Resource-Calculator
 This is a program that calculates the amount of resources needed. <br>
 
 ## Defining Recipes with the `resources` List
