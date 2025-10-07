@@ -1,0 +1,11 @@
+.gemini
+.gitattributes
+GEMINI.md
+IMPROVEMENTS.md
+log.txt
+old.py
+resources.py
+test.py
+test2.py
+tree.txt
+__pycache__

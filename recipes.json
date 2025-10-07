@@ -1,0 +1,175 @@
+[
+  {
+    "inputs": {
+      "Elemental Chassis": 200,
+      "Immacurate Soul": 50,
+      "Energized Spark": 100
+    },
+    "outputs": {
+      "Phylactery": 1
+    }
+  },
+  {
+    "inputs": {
+      "Rich Air": 2
+    },
+    "outputs": {
+      "Mana Crystal": 1
+    }
+  },
+  {
+    "inputs": {
+      "Silica Powder": 2
+    },
+    "outputs": {
+      "Obsidian Plate": 1
+    }
+  },
+  {
+    "inputs": {
+      "Weak Mana Gem": 5
+    },
+    "outputs": {
+      "Pure Mana Gem": 1
+    }
+  },
+  {
+    "inputs": {
+      "Vial of Blood": 3
+    },
+    "outputs": {
+      "Congealed Fleshmatter": 1
+    }
+  },
+  {
+    "inputs": {
+      "Astral Sheet": 5
+    },
+    "outputs": {
+      "Elemental Chassis": 1
+    }
+  },
+  {
+    "inputs": {
+      "Mana Crystal": 3
+    },
+    "outputs": {
+      "Mana Dust": 2,
+      "Liquid Curse": 1,
+      "Silica Powder": 1
+    }
+  },
+  {
+    "inputs": {
+      "Liquid Curse": 2
+    },
+    "outputs": {
+      "Chaos Salt": 1,
+      "Tainted Water": 2
+    }
+  },
+  {
+    "inputs": {
+      "Obsidian Plate": 2
+    },
+    "outputs": {
+      "Gloom Shard": 1,
+      "Silica Powder": 2
+    }
+  },
+  {
+    "inputs": {
+      "Sentient Meat": 3
+    },
+    "outputs": {
+      "Immacurate Soul": 1,
+      "Congealed Fleshmatter": 1,
+      "Vial of Blood": 2
+    }
+  },
+  {
+    "inputs": {
+      "Mana Dust": 2,
+      "Silica Powder": 1
+    },
+    "outputs": {
+      "Weak Mana Gem": 1
+    }
+  },
+  {
+    "inputs": {
+      "Tainted Water": 2,
+      "Copper Coin": 1
+    },
+    "outputs": {
+      "Vial of Blood": 1
+    }
+  },
+  {
+    "inputs": {
+      "Silver Coin": 1,
+      "Gloom Shard": 1
+    },
+    "outputs": {
+      "Bright Shard": 1
+    }
+  },
+  {
+    "inputs": {
+      "Bright Shard": 1,
+      "Gloom Shard": 1,
+      "Chaos Salt": 1
+    },
+    "outputs": {
+      "Equalized Orb": 1
+    }
+  },
+  {
+    "inputs": {
+      "Copper Coin": 1,
+      "Silver Coin": 1,
+      "Gold Coin": 1
+    },
+    "outputs": {
+      "Adamantine Bar": 1
+    }
+  },
+  {
+    "inputs": {
+      "Adamantine Bar": 1,
+      "Bright Shard": 1,
+      "Pure Mana Gem": 1
+    },
+    "outputs": {
+      "Astral Sheet": 1
+    }
+  },
+  {
+    "inputs": {
+      "Vial of Blood": 2,
+      "Chaos Salt": 1
+    },
+    "outputs": {
+      "Life Force": 1
+    }
+  },
+  {
+    "inputs": {
+      "Congealed Fleshmatter": 2,
+      "Life Force": 1
+    },
+    "outputs": {
+      "Sentient Meat": 1
+    }
+  },
+  {
+    "inputs": {
+      "Pure Mana Gem": 1,
+      "Equalized Orb": 1,
+      "Life Force": 1
+    },
+    "outputs": {
+      "Energized Spark": 1
+    }
+  }
+]
