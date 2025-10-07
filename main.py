@@ -4,6 +4,7 @@ from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Union, List, Tuple, Optional, Set
 from difflib import get_close_matches
+import json
 
 # --- Constants ---
 EPSILON = 1e-9  # For floating point comparisons
@@ -26,8 +27,6 @@ class Node:
     def __repr__(self):
         return (f"Node({self.item}, needed={self.needed:.2f}, produced={self.produced:.2f}, "
                 f"actual_produced={self.actual_produced_by_recipe:.2f}, source={self.source}, depth={self.depth})")
-
-import json
 
 # --- Global Variables / Helper Functions ---
 def load_recipes_from_json(file_path: str) -> List[Tuple[Dict[str, float], Dict[str, float]]]:
