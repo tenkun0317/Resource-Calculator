@@ -5,17 +5,6 @@ import main
 
 class TestResourceCalculator(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        """Load recipes once for all tests."""
-        # Load recipes from the actual file to ensure tests run against real data
-        main.RECIPES = main.load_recipes_from_json('recipes.json')
-        # Reset caches to ensure clean state for testing
-        main._all_items_cache = None
-        main._base_resources_cache = None
-        main.get_all_items()
-        main.get_base_resources()
-
     def test_simple_craft_mana_crystal(self):
         """Test crafting Mana Crystal from Rich Air."""
         # Recipe: 2 Rich Air -> 1 Mana Crystal

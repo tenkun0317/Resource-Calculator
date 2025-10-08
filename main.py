@@ -4,8 +4,6 @@ from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Union, List, Tuple, Optional, Set
 from difflib import get_close_matches
-import json
-
 # --- Constants ---
 EPSILON = 1e-9  # For floating point comparisons
 
@@ -28,25 +26,324 @@ class Node:
         return (f"Node({self.item}, needed={self.needed:.2f}, produced={self.produced:.2f}, "
                 f"actual_produced={self.actual_produced_by_recipe:.2f}, source={self.source}, depth={self.depth})")
 
+import json
+
+class RecipeManager:
+    """Manages loading, caching, and accessing recipe data."""
+    def __init__(self, file_path: str):
+        self.recipes = self._load_recipes_from_json(file_path)
+        self._all_items_cache: Optional[List[str]] = None
+        self._base_resources_cache: Optional[Set[str]] = None
+
+    def _load_recipes_from_json(self, file_path: str) -> List[Tuple[Dict[str, float], Dict[str, float]]]:
+        """Loads recipes from a JSON file and converts them to the expected format."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Convert list of {"inputs": {...}, "outputs": {...}} to list of (inputs, outputs)
+            return [(item['inputs'], item['outputs']) for item in data]
+        except FileNotFoundError:
+            print(f"Error: Recipe file not found at '{file_path}'")
+            return []
+        except json.JSONDecodeError:
+            print(f"Error: Could not decode JSON from '{file_path}'")
+            return []
+
+    def get_all_items(self) -> List[str]:
+        """Returns a sorted list of all unique items mentioned in recipes."""
+        if self._all_items_cache is None:
+            all_items = set()
+            for inputs, outputs in self.recipes:
+                all_items.update(inputs.keys())
+                all_items.update(outputs.keys())
+            self._all_items_cache = sorted(list(all_items))
+        return self._all_items_cache
+
+    def get_base_resources(self) -> Set[str]:
+        """Returns a set of base resources (items that can be inputs but not outputs)."""
+        if self._base_resources_cache is None:
+            all_items = set(self.get_all_items())
+            all_outputs = set()
+            for _, outputs in self.recipes:
+                all_outputs.update(outputs.keys())
+            self._base_resources_cache = all_items - all_outputs
+        return self._base_resources_cache
+
+    def find_recipes_for(self, item: str) -> list:
+        """Finds all recipes that produce the given item."""
+        possible_routes = []
+        for i, (recipe_inputs, recipe_outputs) in enumerate(self.recipes):
+            if item in recipe_outputs and recipe_outputs[item] > EPSILON:
+                possible_routes.append({
+                    "index": i,
+                    "inputs": recipe_inputs,
+                    "outputs": recipe_outputs
+                })
+        return possible_routes
+
+
+class ResourceCalculator:
+    """
+    Performs the core calculation of resolving a list of required items
+    into a list of base resources and intermediate products.
+    """
+    def __init__(self, recipe_manager: RecipeManager):
+        self.recipe_manager = recipe_manager
+
+    def calculate(
+        self,
+        items: List[Tuple[str, float]],
+        initial_available_resources: Optional[Dict[str, float]] = None
+    ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], List[Node]]:
+        """
+        Calculates the resources needed for a list of items.
+
+        Returns:
+            Tuple containing:
+            - aggregated_inputs: Total base resources required.
+            - aggregated_outputs: Total final products produced (matching requested items).
+            - final_available_resources: Resources remaining/produced after calculation.
+            - aggregated_intermediates: Intermediate products crafted and consumed.
+            - tree_roots: List of root nodes for the recipe trees.
+        """
+        available_resources = defaultdict(float, initial_available_resources or {})
+        aggregated_inputs = defaultdict(float)  # Tracks total base resources needed
+        aggregated_outputs = defaultdict(float) # Tracks successfully produced requested items
+        aggregated_intermediates = defaultdict(float) # Tracks items crafted and consumed as part of a larger recipe
+        tree_roots: List[Node] = []
+
+        current_overall_available_resources = deepcopy(available_resources)
+        for item_name, item_qty in items:
+            inputs_for_item, outputs_for_item, _, resources_after_item_calc, top_node, intermediates_for_item = self._resolve_item(
+                item_name, item_qty, current_overall_available_resources,
+                processing=set(), dependency_chain=[], depth=0
+            )
+            tree_roots.append(top_node)
+
+            current_overall_available_resources = resources_after_item_calc
+            for resource, amount in inputs_for_item.items():
+                aggregated_inputs[resource] += amount
+            for resource, amount in outputs_for_item.items():
+                aggregated_outputs[resource] += amount
+            for resource, amount in intermediates_for_item.items():
+                aggregated_intermediates[resource] += amount
+
+        final_inputs = {k: v for k, v in aggregated_inputs.items() if v > EPSILON}
+        final_outputs = {k: v for k, v in aggregated_outputs.items() if v > EPSILON}
+        final_available_resources = {k: v for k, v in current_overall_available_resources.items() if v > EPSILON}
+        final_intermediates = {k: v for k, v in aggregated_intermediates.items() if v > EPSILON}
+
+        return final_inputs, final_outputs, final_available_resources, final_intermediates, tree_roots
+
+    def _resolve_item(
+        self,
+        item: str,
+        qty: float,
+        current_available_resources: Dict[str, float],
+        processing: Set[str], # Set of items currently being processed in the recursion stack (for loop detection)
+        dependency_chain: List[str], # List of items in the current dependency chain (for debugging/info)
+        depth: int = 0
+    ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], Node, Dict[str, float]]:
+        """
+        Recursively calculates resources for a given item and quantity.
+        """
+        current_node = Node(item, qty, depth)
+        aggregated_intermediates = defaultdict(float)
+
+        if qty <= EPSILON:
+            current_node.source = "zero_needed"
+            return defaultdict(float), defaultdict(float), defaultdict(float), current_available_resources, current_node, aggregated_intermediates
+
+        if item in processing:
+            current_node.source = "unresolved_loop"
+            return {item: qty}, defaultdict(float), defaultdict(float), current_available_resources.copy(), current_node, aggregated_intermediates
+
+        # --- Step 1: Use from Stock ---
+        qty_after_stock, resources_after_stock_use = self._use_from_stock(item, qty, current_available_resources, current_node, depth)
+
+        # --- Step 2: Crafting / Base Resource ---
+        call_inputs = defaultdict(float)
+        call_outputs = defaultdict(float)
+        call_byproducts = defaultdict(float)
+
+        if qty_after_stock <= EPSILON:
+            if not current_node.source or current_node.source == "unknown":
+                current_node.source = "stock_only"
+            call_outputs[item] += current_node.produced
+            return call_inputs, call_outputs, call_byproducts, resources_after_stock_use, current_node, aggregated_intermediates
+
+        new_processing = processing.copy()
+        new_processing.add(item)
+        new_dependency_chain = dependency_chain + [item]
+
+        best_route_info = self._find_best_route(item, qty_after_stock, resources_after_stock_use, new_processing, new_dependency_chain, depth)
+
+        if best_route_info:
+            for res, amount in best_route_info["inputs"].items():
+                call_inputs[res] += amount
+            for res, amount in best_route_info["outputs"].items():
+                call_outputs[res] += amount
+            for res, amount in best_route_info["byproducts"].items():
+                call_byproducts[res] += amount
+            for res, amount in best_route_info["intermediates"].items():
+                aggregated_intermediates[res] += amount
+
+            resources_after_fulfillment = defaultdict(float, best_route_info["available_after_route"])
+
+            current_node.source = f"recipe_{best_route_info['index']}"
+            current_node.recipe_details = (best_route_info['recipe_inputs'], best_route_info['recipe_outputs'])
+            current_node.produced += best_route_info["outputs"].get(item, 0)
+            current_node.actual_produced_by_recipe = best_route_info["actual_produced_by_recipe"]
+            current_node.children.extend(best_route_info["children_nodes"])
+
+        else: # No viable recipe route found
+            if item in self.recipe_manager.get_base_resources():
+                current_node.source = "base"
+                current_node.produced += qty_after_stock
+                current_node.actual_produced_by_recipe = qty_after_stock
+                call_inputs[item] += qty_after_stock
+                call_outputs[item] += qty_after_stock
+                resources_after_fulfillment = resources_after_stock_use
+            else:
+                current_node.source = "missing_recipe_or_base"
+                call_inputs[item] += qty_after_stock
+                resources_after_fulfillment = resources_after_stock_use
+
+        if item not in self.recipe_manager.get_base_resources() and \
+            current_node.source.startswith("recipe_") and \
+            current_node.produced > EPSILON and \
+            depth > 0:
+            aggregated_intermediates[item] += current_node.produced
+
+        return call_inputs, call_outputs, call_byproducts, dict(resources_after_fulfillment), current_node, aggregated_intermediates
+
+    def _use_from_stock(self, item: str, qty: float, available: Dict[str, float], node: Node, depth: int) -> Tuple[float, Dict[str, float]]:
+        """Checks for and uses available items from stock."""
+        available_after_use = deepcopy(available)
+        available_in_stock = available.get(item, 0)
+        used_from_stock = min(available_in_stock, qty)
+
+        if used_from_stock > EPSILON:
+            available_after_use[item] -= used_from_stock
+            qty -= used_from_stock
+
+            stock_node = Node(item, used_from_stock, depth + 1)
+            stock_node.source = "stock"
+            stock_node.produced = used_from_stock
+            node.add_child(stock_node)
+            node.produced += used_from_stock
+        
+        return qty, available_after_use
+
+    def _find_best_route(self, item: str, qty: float, available_resources: Dict[str, float], processing: Set[str], dependency_chain: List[str], depth: int):
+        possible_routes = self.recipe_manager.find_recipes_for(item)
+        if not possible_routes:
+            return None
+
+        all_evaluated_route_results = []
+        for route_info in possible_routes:
+            evaluation = self._evaluate_route(route_info, item, qty, available_resources, processing, dependency_chain, depth)
+            if evaluation:
+                all_evaluated_route_results.append(evaluation)
+
+        if not all_evaluated_route_results:
+            return None
+
+        return min(all_evaluated_route_results, key=lambda x: x["score"])
+
+    def _evaluate_route(self, route_info: dict, item: str, qty: float, available_resources: Dict[str, float], processing: Set[str], dependency_chain: List[str], depth: int):
+        recipe_index = route_info["index"]
+        recipe_inputs_template = route_info["inputs"]
+        recipe_outputs_template = route_info["outputs"]
+
+        route_total_inputs_needed = defaultdict(float)
+        route_total_byproducts_generated = defaultdict(float)
+        route_children_nodes = []
+        num_sub_recipe_steps = 0
+        sub_intermediates_agg = defaultdict(float)
+
+        if item not in recipe_outputs_template or recipe_outputs_template[item] <= EPSILON:
+            return None
+
+        recipe_output_qty_per_run = recipe_outputs_template[item]
+        scale_factor = math.ceil(qty / recipe_output_qty_per_run)
+        current_resources_for_this_route = deepcopy(available_resources)
+
+        for input_item, input_qty_per_recipe in recipe_inputs_template.items():
+            required_qty_for_input_item = input_qty_per_recipe * scale_factor
+
+            sub_inputs, _, sub_byproducts, resources_after_sub_call, sub_node, sub_intermediates = self._resolve_item(
+                input_item, required_qty_for_input_item, current_resources_for_this_route,
+                processing, dependency_chain, depth + 1
+            )
+            current_resources_for_this_route = resources_after_sub_call
+
+            if input_item in sub_inputs and input_item not in self.recipe_manager.get_base_resources():
+                if sub_inputs[input_item] >= required_qty_for_input_item - EPSILON:
+                    return None # Route is not viable
+
+            for res, amount in sub_inputs.items():
+                route_total_inputs_needed[res] += amount
+            for res, amount in sub_byproducts.items():
+                route_total_byproducts_generated[res] += amount
+            for res, amount in sub_intermediates.items():
+                sub_intermediates_agg[res] += amount
+            route_children_nodes.append(sub_node)
+
+            if any(n.source.startswith("recipe_") for n in sub_node.children) or sub_node.source.startswith("recipe_"):
+                num_sub_recipe_steps += 1
+
+        actual_produced_target_item_qty = recipe_output_qty_per_run * scale_factor
+        used_target_item_qty = qty
+
+        excess_target_item_qty = actual_produced_target_item_qty - used_target_item_qty
+        if excess_target_item_qty > EPSILON:
+            route_total_byproducts_generated[item] += excess_target_item_qty
+
+        for output_item, output_qty_per_recipe in recipe_outputs_template.items():
+            if output_item != item:
+                produced_byproduct_qty = output_qty_per_recipe * scale_factor
+                if produced_byproduct_qty > EPSILON:
+                    route_total_byproducts_generated[output_item] += produced_byproduct_qty
+
+        final_resource_state_for_this_route = defaultdict(float, available_resources)
+
+        for res, amount in route_total_inputs_needed.items():
+            if res in self.recipe_manager.get_base_resources():
+                final_resource_state_for_this_route[res] -= amount
+                if final_resource_state_for_this_route[res] < EPSILON:
+                    final_resource_state_for_this_route[res] = 0
+
+        for res, amount in route_total_byproducts_generated.items():
+            final_resource_state_for_this_route[res] += amount
+
+        final_resource_state_for_this_route = defaultdict(float, {
+            k: v for k, v in final_resource_state_for_this_route.items() if v > EPSILON
+        })
+
+        route_score = (sum(route_total_inputs_needed.values()) * 1000) + num_sub_recipe_steps
+
+        return {
+            "score": route_score,
+            "inputs": route_total_inputs_needed,
+            "outputs": {item: used_target_item_qty},
+            "byproducts": route_total_byproducts_generated,
+            "available_after_route": dict(final_resource_state_for_this_route),
+            "index": recipe_index,
+            "children_nodes": route_children_nodes,
+            "actual_produced_by_recipe": actual_produced_target_item_qty,
+            "recipe_inputs": recipe_inputs_template,
+            "recipe_outputs": recipe_outputs_template,
+            "intermediates": sub_intermediates_agg
+        }
+
+
+
 # --- Global Variables / Helper Functions ---
-def load_recipes_from_json(file_path: str) -> List[Tuple[Dict[str, float], Dict[str, float]]]:
-    """Loads recipes from a JSON file and converts them to the expected format."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        # Convert list of {"inputs": {...}, "outputs": {...}} to list of (inputs, outputs)
-        return [(item['inputs'], item['outputs']) for item in data]
-    except FileNotFoundError:
-        print(f"Error: Recipe file not found at '{file_path}'")
-        return []
-    except json.JSONDecodeError:
-        print(f"Error: Could not decode JSON from '{file_path}'")
-        return []
+recipe_manager = RecipeManager('recipes.json')
 
-RECIPES = load_recipes_from_json('recipes.json')
 
-_all_items_cache: Optional[List[str]] = None
-_base_resources_cache: Optional[Set[str]] = None
+# --- Global Variables / Helper Functions ---
 
 def format_float(value: float) -> str:
     """Formats a float for display, removing trailing zeros and converting to int if possible."""
@@ -57,275 +354,6 @@ def format_float(value: float) -> str:
     else:
         return f"{value:.4f}".rstrip('0').rstrip('.')
 
-def get_all_items() -> List[str]:
-    """Returns a sorted list of all unique items mentioned in RECIPES."""
-    global _all_items_cache
-    if _all_items_cache is None:
-        all_items = set()
-        for inputs, outputs in RECIPES:
-            all_items.update(inputs.keys())
-            all_items.update(outputs.keys())
-        _all_items_cache = sorted(list(all_items))
-    return _all_items_cache
-
-def get_base_resources() -> Set[str]:
-    """Returns a set of base resources (items that can be inputs but not outputs of any recipe)."""
-    global _base_resources_cache
-    if _base_resources_cache is None:
-        all_items = set(get_all_items())
-        all_outputs = set()
-        for _, outputs in RECIPES:
-            all_outputs.update(outputs.keys())
-        _base_resources_cache = all_items - all_outputs
-    return _base_resources_cache
-
-# --- Core Calculation Logic ---
-def calculate_resources(
-    items: List[Tuple[str, float]],
-    initial_available_resources: Optional[Dict[str, float]] = None
-) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], List[Node]]:
-    """
-    Calculates the resources needed for a list of items.
-
-    Returns:
-        Tuple containing:
-        - aggregated_inputs: Total base resources required.
-        - aggregated_outputs: Total final products produced (matching requested items).
-        - final_available_resources: Resources remaining/produced after calculation.
-        - aggregated_intermediates: Intermediate products crafted and consumed.
-        - tree_roots: List of root nodes for the recipe trees.
-    """
-    available_resources = defaultdict(float, initial_available_resources or {})
-    aggregated_inputs = defaultdict(float)  # Tracks total base resources needed
-    aggregated_outputs = defaultdict(float) # Tracks successfully produced requested items
-    aggregated_intermediates = defaultdict(float) # Tracks items crafted and consumed as part of a larger recipe
-    tree_roots: List[Node] = []
-
-    # --- Recursive function to calculate resources for a single item ---
-    def recurse(
-        item: str,
-        qty: float,
-        current_available_resources: Dict[str, float],
-        processing: Set[str], # Set of items currently being processed in the recursion stack (for loop detection)
-        dependency_chain: List[str], # List of items in the current dependency chain (for debugging/info)
-        depth: int = 0
-    ) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], Node]:
-        """
-        Recursively calculates resources for a given item and quantity.
-
-        Returns:
-            Tuple containing:
-            - call_inputs: Base resources consumed by this call.
-            - call_outputs: Target items produced by this call.
-            - call_byproducts: Byproducts generated by this call.
-            - resources_after_fulfillment: State of available resources after this call.
-            - current_node: The Node object representing this item in the crafting tree.
-        """
-        current_node = Node(item, qty, depth)
-
-        if qty <= EPSILON:
-            current_node.source = "zero_needed"
-            return defaultdict(float), defaultdict(float), defaultdict(float), current_available_resources, current_node
-
-        if item in processing:
-            current_node.source = "unresolved_loop"
-            return {item: qty}, defaultdict(float), defaultdict(float), current_available_resources.copy(), current_node
-
-        new_processing = processing.copy()
-        new_processing.add(item)
-        new_dependency_chain = dependency_chain + [item]
-
-        call_inputs = defaultdict(float)
-        call_outputs = defaultdict(float)
-        call_byproducts = defaultdict(float)
-
-        resources_before_fulfillment = deepcopy(current_available_resources)
-        resources_after_stock_use = deepcopy(resources_before_fulfillment)
-
-        available_qty_in_stock = resources_before_fulfillment.get(item, 0)
-        used_from_stock = min(available_qty_in_stock, qty)
-
-        if used_from_stock > EPSILON:
-            resources_after_stock_use[item] -= used_from_stock
-            qty -= used_from_stock
-
-            stock_node = Node(item, used_from_stock, depth + 1)
-            stock_node.source = "stock"
-            stock_node.produced = used_from_stock
-            current_node.add_child(stock_node)
-            current_node.produced += used_from_stock
-
-        if qty <= EPSILON:
-            if not current_node.source or current_node.source == "unknown":
-                current_node.source = "stock_only"
-            # If the entire need is met from stock, it's considered an "output" of this process.
-            call_outputs[item] += current_node.produced
-            return call_inputs, call_outputs, call_byproducts, resources_after_stock_use, current_node
-
-        possible_routes = []
-        for i, (recipe_inputs, recipe_outputs) in enumerate(RECIPES):
-            if item in recipe_outputs and recipe_outputs[item] > EPSILON:
-                possible_routes.append({
-                    "index": i,
-                    "inputs": recipe_inputs,
-                    "outputs": recipe_outputs
-                })
-
-        if possible_routes:
-            all_evaluated_route_results = []
-            resources_for_recipe_evaluation_phase = resources_after_stock_use
-
-            for route_info in possible_routes:
-                recipe_index = route_info["index"]
-                recipe_inputs_template = route_info["inputs"]
-                recipe_outputs_template = route_info["outputs"]
-
-                route_total_inputs_needed = defaultdict(float)
-                route_total_byproducts_generated = defaultdict(float)
-                route_children_nodes = []
-                is_route_viable = True
-                num_sub_recipe_steps = 0
-
-                if item not in recipe_outputs_template or recipe_outputs_template[item] <= EPSILON:
-                    is_route_viable = False
-                    continue
-
-                recipe_output_qty_per_run = recipe_outputs_template[item]
-                scale_factor = math.ceil(qty / recipe_output_qty_per_run)
-                current_resources_for_this_route = deepcopy(resources_for_recipe_evaluation_phase)
-
-                for input_item, input_qty_per_recipe in recipe_inputs_template.items():
-                    required_qty_for_input_item = input_qty_per_recipe * scale_factor
-
-                    sub_inputs, _, sub_byproducts, resources_after_sub_call, sub_node = recurse(
-                        input_item, required_qty_for_input_item, current_resources_for_this_route,
-                        new_processing, new_dependency_chain, depth + 1
-                    )
-                    current_resources_for_this_route = resources_after_sub_call
-
-                    if input_item in sub_inputs and input_item not in get_base_resources():
-                        if sub_inputs[input_item] >= required_qty_for_input_item - EPSILON:
-                            is_route_viable = False
-                            break
-
-                    for res, amount in sub_inputs.items():
-                        route_total_inputs_needed[res] += amount
-                    for res, amount in sub_byproducts.items():
-                        route_total_byproducts_generated[res] += amount
-                    route_children_nodes.append(sub_node)
-
-                    if any(n.source.startswith("recipe_") for n in sub_node.children) or sub_node.source.startswith("recipe_"):
-                        num_sub_recipe_steps += 1
-
-                if not is_route_viable:
-                    continue
-
-                actual_produced_target_item_qty = recipe_output_qty_per_run * scale_factor
-                used_target_item_qty = qty
-
-                excess_target_item_qty = actual_produced_target_item_qty - used_target_item_qty
-                if excess_target_item_qty > EPSILON:
-                    route_total_byproducts_generated[item] += excess_target_item_qty
-
-                for output_item, output_qty_per_recipe in recipe_outputs_template.items():
-                    if output_item != item:
-                        produced_byproduct_qty = output_qty_per_recipe * scale_factor
-                        if produced_byproduct_qty > EPSILON:
-                            route_total_byproducts_generated[output_item] += produced_byproduct_qty
-
-                final_resource_state_for_this_route = defaultdict(float, resources_for_recipe_evaluation_phase)
-
-                for res, amount in route_total_inputs_needed.items():
-                    if res in get_base_resources():
-                        final_resource_state_for_this_route[res] -= amount
-                        if final_resource_state_for_this_route[res] < EPSILON: # Handles potential floating point inaccuracies leading to tiny negatives
-                            final_resource_state_for_this_route[res] = 0
-
-                for res, amount in route_total_byproducts_generated.items():
-                    final_resource_state_for_this_route[res] += amount
-
-                final_resource_state_for_this_route = defaultdict(float, {
-                    k: v for k, v in final_resource_state_for_this_route.items() if v > EPSILON
-                })
-
-                route_score = (sum(route_total_inputs_needed.values()) * 1000) + num_sub_recipe_steps
-
-                all_evaluated_route_results.append({
-                    "score": route_score,
-                    "inputs": route_total_inputs_needed,
-                    "outputs": {item: used_target_item_qty},
-                    "byproducts": route_total_byproducts_generated,
-                    "available_after_route": dict(final_resource_state_for_this_route),
-                    "recipe_index": recipe_index,
-                    "children_nodes": route_children_nodes,
-                    "actual_produced_by_recipe": actual_produced_target_item_qty
-                })
-
-            if all_evaluated_route_results:
-                best_route_info = min(all_evaluated_route_results, key=lambda x: x["score"])
-
-                for res, amount in best_route_info["inputs"].items():
-                    call_inputs[res] += amount
-                for res, amount in best_route_info["outputs"].items():
-                    call_outputs[res] += amount
-                for res, amount in best_route_info["byproducts"].items():
-                    call_byproducts[res] += amount
-
-                resources_after_fulfillment = defaultdict(float, best_route_info["available_after_route"])
-
-                current_node.source = f"recipe_{best_route_info['recipe_index']}"
-                current_node.recipe_details = (RECIPES[best_route_info['recipe_index']][0], RECIPES[best_route_info['recipe_index']][1])
-                current_node.produced += best_route_info["outputs"].get(item, 0)
-                current_node.actual_produced_by_recipe = best_route_info["actual_produced_by_recipe"]
-                current_node.children.extend(best_route_info["children_nodes"])
-
-            else:
-                current_node.source = "no_viable_route"
-                call_inputs[item] += qty
-                resources_after_fulfillment = resources_after_stock_use
-
-        else:
-            if item in get_base_resources():
-                current_node.source = "base"
-                current_node.produced = qty
-                current_node.actual_produced_by_recipe = qty
-                call_inputs[item] += qty
-                # If a base resource is "calculated", it's both an input and an output of this step.
-                call_outputs[item] += qty
-                resources_after_fulfillment = resources_after_stock_use
-            else:
-                current_node.source = "missing_recipe_or_base"
-                call_inputs[item] += qty
-                resources_after_fulfillment = resources_after_stock_use
-
-        if item not in get_base_resources() and \
-            current_node.source.startswith("recipe_") and \
-            current_node.produced > EPSILON and \
-            depth > 0:
-            aggregated_intermediates[item] += current_node.produced
-
-        return call_inputs, call_outputs, call_byproducts, dict(resources_after_fulfillment), current_node
-
-    current_overall_available_resources = deepcopy(available_resources)
-    for item_name, item_qty in items:
-        inputs_for_item, outputs_for_item, _, resources_after_item_calc, top_node = recurse(
-            item_name, item_qty, current_overall_available_resources,
-            processing=set(), dependency_chain=[], depth=0
-        )
-        tree_roots.append(top_node)
-
-        current_overall_available_resources = resources_after_item_calc
-        for resource, amount in inputs_for_item.items():
-            aggregated_inputs[resource] += amount
-        for resource, amount in outputs_for_item.items():
-            aggregated_outputs[resource] += amount
-
-    final_inputs = {k: v for k, v in aggregated_inputs.items() if v > EPSILON}
-    final_outputs = {k: v for k, v in aggregated_outputs.items() if v > EPSILON}
-    final_available_resources = {k: v for k, v in current_overall_available_resources.items() if v > EPSILON}
-    final_intermediates = {k: v for k, v in aggregated_intermediates.items() if v > EPSILON}
-
-    return final_inputs, final_outputs, final_available_resources, final_intermediates, tree_roots
 
 # --- Product Categorization ---
 def categorize_products(
@@ -341,7 +369,7 @@ def categorize_products(
         "byproduct": defaultdict(float)
     }
     requested_set = set(requested_items)
-    base_res_set = get_base_resources()
+    base_res_set = recipe_manager.get_base_resources()
 
     for item, amount in outputs.items():
         if item in requested_set and amount > EPSILON:
@@ -383,7 +411,7 @@ def process_input(
     initial_available_resources: Optional[Dict[str, float]] = None
 ) -> Union[Tuple[Dict[str, float], Dict[str, Dict[str, float]], Dict[str, float], List[Node]], str]:
     """Processes user input string, calculates resources, and categorizes products."""
-    all_items_list = get_all_items()
+    all_items_list = recipe_manager.get_all_items()
     items_to_calculate: List[Tuple[str, float]] = []
     requested_item_names: List[str] = []
 
@@ -423,7 +451,8 @@ def process_input(
         if not items_to_calculate:
             return "No valid items entered for calculation."
 
-        final_inputs, final_outputs, final_available, final_intermediates, trees = calculate_resources(
+        calculator = ResourceCalculator(recipe_manager)
+        final_inputs, final_outputs, final_available, final_intermediates, trees = calculator.calculate(
             items_to_calculate, initial_available_dict
         )
 
@@ -502,11 +531,11 @@ def main() -> None:
     print("Welcome to the Resource Calculator!")
     print("Enter items and quantities (e.g., 'Planks, 5; Stick, 2' or 'Wooden Pickaxe').")
 
-    get_all_items()
-    get_base_resources()
+    recipe_manager.get_all_items()
+    recipe_manager.get_base_resources()
 
-    print("Available items:", ", ".join(get_all_items()))
-    print("Base resources:", ", ".join(sorted(list(get_base_resources()))))
+    print("Available items:", ", ".join(recipe_manager.get_all_items()))
+    print("Base resources:", ", ".join(sorted(list(recipe_manager.get_base_resources()))))
     print("Type 'quit' to exit.")
 
     while True:
@@ -530,7 +559,7 @@ def main() -> None:
             print("\nTotal base resources needed for this request:")
             base_resources_found_in_inputs = False
             for res, amt in sorted(inputs.items()):
-                if res in get_base_resources():
+                if res in recipe_manager.get_base_resources():
                     print(f"  {res}: {format_float(math.ceil(amt))}")
                     base_resources_found_in_inputs = True
             if not base_resources_found_in_inputs:
