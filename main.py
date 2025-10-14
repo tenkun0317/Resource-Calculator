@@ -4,27 +4,11 @@ from copy import deepcopy
 from collections import defaultdict
 from typing import Dict, Union, List, Tuple, Optional, Set
 from difflib import get_close_matches
+from view import Node
 # --- Constants ---
 EPSILON = 1e-9  # For floating point comparisons
 
 # --- Node class definition ---
-class Node:
-    def __init__(self, item: str, needed: float, depth: int):
-        self.item = item
-        self.needed = needed
-        self.produced = 0.0  # Amount of 'item' this node contributes to fulfilling 'needed'
-        self.actual_produced_by_recipe = 0.0  # Total amount of 'item' produced by the recipe (can be > needed)
-        self.source = "unknown"  # How this item was obtained (e.g., "stock", "base", "recipe_X")
-        self.recipe_details: Optional[Tuple[Dict[str, float], Dict[str, float]]] = None # Inputs and outputs of the chosen recipe
-        self.children: List['Node'] = []  # Child nodes representing inputs or stock usage
-        self.depth = depth  # Depth in the crafting tree
-
-    def add_child(self, child: 'Node'):
-        self.children.append(child)
-
-    def __repr__(self):
-        return (f"Node({self.item}, needed={self.needed:.2f}, produced={self.produced:.2f}, "
-                f"actual_produced={self.actual_produced_by_recipe:.2f}, source={self.source}, depth={self.depth})")
 
 import json
 
@@ -343,18 +327,6 @@ class ResourceCalculator:
 recipe_manager = RecipeManager('recipes.json')
 
 
-# --- Global Variables / Helper Functions ---
-
-def format_float(value: float) -> str:
-    """Formats a float for display, removing trailing zeros and converting to int if possible."""
-    if abs(value) < EPSILON:
-        return "0"
-    if abs(value - round(value)) < EPSILON:
-        return str(int(round(value)))
-    else:
-        return f"{value:.4f}".rstrip('0').rstrip('.')
-
-
 # --- Product Categorization ---
 def categorize_products(
     outputs: Dict[str, float],
@@ -469,74 +441,16 @@ def process_input(
         print(f"An unexpected error occurred during input processing: {traceback.format_exc()}")
         return f"An unexpected error occurred: {str(e)}."
 
-# --- Output Printing ---
-def _get_node_sort_priority(source_str: Optional[str]) -> int:
-    """Helper for sorting nodes in the tree view."""
-    if source_str is None:
-        return 3
-    if source_str == "stock":
-        return 0
-    if source_str == "base":
-        return 1
-    if source_str.startswith("recipe_"):
-        return 2
-    return 3
 
-def print_recipe_tree(nodes: List[Node]):
-    """Prints the recipe tree(s) in a human-readable format."""
-    print("\n--- Recipe Tree ---")
-    if not nodes:
-        print("  (No tree generated)")
-        return
-
-    def print_node_recursive(node: Node, prefix: str = "", is_last_child: bool = True):
-        connector = "└─ " if is_last_child else "├─ "
-        line = f"{prefix}{connector}{node.item} (Needed: {format_float(node.needed)}"
-
-        source_info = node.source or "unknown"
-        if source_info.startswith("recipe_") and node.actual_produced_by_recipe > EPSILON:
-            line += f", Produced by recipe: {format_float(node.actual_produced_by_recipe)}"
-        elif source_info == "stock" and node.produced > EPSILON:
-            line += f", Used from Stock: {format_float(node.produced)}"
-        elif node.produced > EPSILON and not source_info.startswith("recipe_"):
-            line += f", Provided: {format_float(node.produced)}"
-
-        line += f") [{source_info}]"
-        print(line)
-
-        new_prefix = prefix + ("    " if is_last_child else "│   ")
-
-        sorted_children = sorted(
-            node.children,
-            key=lambda child: (_get_node_sort_priority(child.source), child.item)
-        )
-
-        for i, child_node in enumerate(sorted_children):
-            print_node_recursive(child_node, new_prefix, i == len(sorted_children) - 1)
-
-    for root_node in nodes:
-        print(f"\nTree for: {root_node.item} (Needed: {format_float(root_node.needed)}) [{root_node.source or 'unknown'}]")
-        sorted_root_children = sorted(
-            root_node.children,
-            key=lambda child: (_get_node_sort_priority(child.source), child.item)
-        )
-        for i, child_node in enumerate(sorted_root_children):
-            print_node_recursive(child_node, "", i == len(sorted_root_children) - 1)
+from view import ConsoleView
 
 # --- Main Program Loop ---
 def main() -> None:
     """Main function to run the interactive resource calculator."""
     session_available_resources = defaultdict(float)
+    view = ConsoleView()
 
-    print("Welcome to the Resource Calculator!")
-    print("Enter items and quantities (e.g., 'Planks, 5; Stick, 2' or 'Wooden Pickaxe').")
-
-    recipe_manager.get_all_items()
-    recipe_manager.get_base_resources()
-
-    print("Available items:", ", ".join(recipe_manager.get_all_items()))
-    print("Base resources:", ", ".join(sorted(list(recipe_manager.get_base_resources()))))
-    print("Type 'quit' to exit.")
+    view.display_welcome_message(recipe_manager)
 
     while True:
         user_input = input("\nEnter items to calculate (or 'quit'): ").strip()
@@ -552,54 +466,10 @@ def main() -> None:
         else:
             inputs, categorized_prods, final_available_after_calc, trees = calculation_result
 
-            print_recipe_tree(trees)
-
-            print("\n--- Calculation Summary ---")
-
-            print("\nTotal base resources needed for this request:")
-            base_resources_found_in_inputs = False
-            for res, amt in sorted(inputs.items()):
-                if res in recipe_manager.get_base_resources():
-                    print(f"  {res}: {format_float(math.ceil(amt))}")
-                    base_resources_found_in_inputs = True
-            if not base_resources_found_in_inputs:
-                print("  None")
-
-            print("\nProducts Breakdown:")
-            output_category_printed = False
-            if categorized_prods.get("finished"):
-                output_category_printed = True
-                print("  Finished products (Requested & Produced):")
-                for res, amt in sorted(categorized_prods["finished"].items()):
-                    print(f"    {res}: {format_float(amt)}")
-
-            if categorized_prods.get("intermediate"):
-                output_category_printed = True
-                print("  Intermediate products (Crafted & Consumed):")
-                for res, amt in sorted(categorized_prods["intermediate"].items()):
-                    print(f"    {res}: {format_float(amt)}")
-
-            if categorized_prods.get("byproduct"):
-                output_category_printed = True
-                print("  Byproducts / Excess (Remaining non-base items):")
-                for res, amt in sorted(categorized_prods["byproduct"].items()):
-                    print(f"    {res}: {format_float(amt)}")
-
-            if not output_category_printed and not inputs:
-                print("  No specific products generated or resources needed/remaining from this request.")
-            elif not output_category_printed and inputs:
-                print("  Only base inputs were consumed; no complex products generated or remaining.")
+            view.print_recipe_tree(trees)
+            view.display_summary(inputs, categorized_prods, final_available_after_calc, recipe_manager)
 
             session_available_resources = defaultdict(float, final_available_after_calc)
-
-            print("\nUpdated available resources for next calculation (includes byproducts/excess from this run):")
-            has_any_available_resources = False
-            for item, amount in sorted(session_available_resources.items()):
-                if amount > EPSILON:
-                    print(f"  {item}: {format_float(amount)}")
-                    has_any_available_resources = True
-            if not has_any_available_resources:
-                print("  None")
 
         print("-" * 40)
 
