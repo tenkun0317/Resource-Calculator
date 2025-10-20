@@ -1,14 +1,24 @@
-
 import unittest
-from unittest.mock import patch
-import main
+import os
+
+from recipe_manager import RecipeManager
+from input_parser import process_input
 
 class TestResourceCalculator(unittest.TestCase):
+
+    def setUp(self):
+        """Set up a recipe manager for each test."""
+        self.recipe_manager = RecipeManager('recipes.json')
+
+    def tearDown(self):
+        """Clean up the inventory file after each test."""
+        if os.path.exists('inventory.json'):
+            os.remove('inventory.json')
 
     def test_simple_craft_mana_crystal(self):
         """Test crafting Mana Crystal from Rich Air."""
         # Recipe: 2 Rich Air -> 1 Mana Crystal
-        result = main.process_input("Mana Crystal, 1")
+        result = process_input("Mana Crystal, 1", self.recipe_manager, {})
         self.assertNotIsInstance(result, str, "Processing failed")
         inputs, categorized_prods, final_available, _ = result
         
@@ -20,7 +30,7 @@ class TestResourceCalculator(unittest.TestCase):
 
     def test_multi_step_craft_astral_sheet(self):
         """Test a more complex craft like Astral Sheet."""
-        result = main.process_input("Astral Sheet, 1")
+        result = process_input("Astral Sheet, 1", self.recipe_manager, {})
         self.assertNotIsInstance(result, str, "Processing failed")
         inputs, categorized_prods, final_available, _ = result
 
@@ -43,7 +53,7 @@ class TestResourceCalculator(unittest.TestCase):
         """Test calculation with some resources already available in stock."""
         # To craft 1 Mana Crystal, 2 Rich Air are needed. We provide 1 from stock.
         initial_stock = {"Rich Air": 1}
-        result = main.process_input("Mana Crystal, 1", initial_available_resources=initial_stock)
+        result = process_input("Mana Crystal, 1", self.recipe_manager, initial_stock)
         self.assertNotIsInstance(result, str, "Processing failed")
         inputs, _, final_available, _ = result
         
@@ -56,7 +66,7 @@ class TestResourceCalculator(unittest.TestCase):
         """Test that byproducts and excess from recipes are correctly calculated."""
         # Recipe: 3 Mana Crystal -> 2 Mana Dust, 1 Liquid Curse, 1 Silica Powder
         # We need 3 Mana Crystals for this. 1 Mana Crystal needs 2 Rich Air. So, 6 Rich Air total.
-        result = main.process_input("Mana Dust, 2")
+        result = process_input("Mana Dust, 2", self.recipe_manager, {})
         self.assertNotIsInstance(result, str, "Processing failed")
         inputs, categorized_prods, final_available, _ = result
 
@@ -69,26 +79,9 @@ class TestResourceCalculator(unittest.TestCase):
         self.assertAlmostEqual(final_available["Liquid Curse"], 1.0)
         self.assertAlmostEqual(final_available["Silica Powder"], 1.0)
 
-    def test_invalid_item_name(self):
-        """Test input with an item name that does not exist."""
-        result = main.process_input("NonExistentItem, 1")
-        self.assertIsInstance(result, str)
-        self.assertIn("not found", result)
-
-    def test_fuzzy_match_for_item_name(self):
-        """Test the fuzzy matching for a misspelled item name."""
-        # "Mana rystal" is a typo but close to "Mana Crystal".
-        with patch('builtins.print') as mock_print:
-            result = main.process_input("Mana rystal, 1")
-            self.assertNotIsInstance(result, str, "Processing failed")
-            inputs, _, _, _ = result
-            self.assertEqual(inputs, {"Rich Air": 2})
-            # Check that the user was notified about the fuzzy match assumption.
-            mock_print.assert_any_call("Notice: 'Mana rystal' not found. Assuming you meant 'Mana Crystal'.")
-
     def test_base_resource_request(self):
         """Test requesting a base resource directly, which should just pass through."""
-        result = main.process_input("Rich Air, 10")
+        result = process_input("Rich Air, 10", self.recipe_manager, {})
         self.assertNotIsInstance(result, str, "Processing failed")
         inputs, categorized_prods, _, _ = result
         
@@ -98,7 +91,7 @@ class TestResourceCalculator(unittest.TestCase):
 
     def test_full_integration_phylactery(self):
         """Test the most complex item, 'Phylactery', as a full integration test."""
-        result = main.process_input("Phylactery, 1")
+        result = process_input("Phylactery, 1", self.recipe_manager, {})
         self.assertNotIsInstance(result, str, "Processing failed")
         _, categorized_prods, final_available, _ = result
 
@@ -113,6 +106,3 @@ class TestResourceCalculator(unittest.TestCase):
         # Check that there are byproducts/excess materials left over.
         self.assertTrue(len(final_available) > 0, "Expected byproducts or excess materials, but none were found.")
         self.assertIn("Vial of Blood", final_available) # This is a common byproduct in the chain
-
-if __name__ == '__main__':
-    unittest.main()

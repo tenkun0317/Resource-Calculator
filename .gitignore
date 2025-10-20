@@ -1,5 +1,4 @@
 .gemini
 .gitattributes
-GEMINI.md
-IMPROVEMENTS.md
 __pycache__
+.coverage

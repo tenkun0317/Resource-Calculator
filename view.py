@@ -3,28 +3,9 @@ import math
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-# Assuming Node is defined elsewhere and will be imported, but for now, we can use a forward declaration if needed.
-# from main import Node 
+from models import Node
 
 EPSILON = 1e-9
-
-class Node:
-    def __init__(self, item: str, needed: float, depth: int):
-        self.item = item
-        self.needed = needed
-        self.produced = 0.0  # Amount of 'item' this node contributes to fulfilling 'needed'
-        self.actual_produced_by_recipe = 0.0  # Total amount of 'item' produced by the recipe (can be > needed)
-        self.source = "unknown"  # How this item was obtained (e.g., "stock", "base", "recipe_X")
-        self.recipe_details: Optional[Tuple[Dict[str, float], Dict[str, float]]] = None # Inputs and outputs of the chosen recipe
-        self.children: List['Node'] = []  # Child nodes representing inputs or stock usage
-        self.depth = depth  # Depth in the crafting tree
-
-    def add_child(self, child: 'Node'):
-        self.children.append(child)
-
-    def __repr__(self):
-        return (f"Node({self.item}, needed={self.needed:.2f}, produced={self.produced:.2f}, "
-                f"actual_produced={self.actual_produced_by_recipe:.2f}, source={self.source}, depth={self.depth})")
 
 class ConsoleView:
     """Handles all console output for the application."""
@@ -139,13 +120,42 @@ class ConsoleView:
         if not has_any_available_resources:
             print("  None")
 
-    def display_welcome_message(self, recipe_manager):
-        print("Welcome to the Resource Calculator!")
-        print("Enter items and quantities (e.g., 'Planks, 5; Stick, 2' or 'Wooden Pickaxe').")
+    def display_reverse_calculation(self, craftable_items: Dict[str, float]):
+        """Displays the results of the reverse calculation."""
+        print("\n--- Max Craftable Items from Current Resources ---")
+        if not craftable_items:
+            print("  (None)")
+            return
 
-        recipe_manager.get_all_items()
-        recipe_manager.get_base_resources()
+        for item, amount in sorted(craftable_items.items()):
+            print(f"  {item}: {self.format_float(amount)}")
 
-        print("Available items:", ", ".join(recipe_manager.get_all_items()))
-        print("Base resources:", ", ".join(sorted(list(recipe_manager.get_base_resources()))))
-        print("Type 'quit' to exit.")
+    def display_available_items_for_calculation(self, all_items: List[str]):
+        """Displays all item names that can be used in calculations."""
+        print("\n--- Available Items for Calculation ---")
+        if not all_items:
+            print("  (No items found in recipes)")
+            return
+        print("  " + ", ".join(all_items))
+
+    def display_recipes(self, recipes: List[Tuple[Dict[str, float], Dict[str, float]]]):
+        """Displays all available recipes in a readable format."""
+        print("\n--- Available Recipes ---")
+        if not recipes:
+            print("  (No recipes found)")
+            return
+
+        for i, (inputs, outputs) in enumerate(recipes):
+            input_str = ", ".join([f"{self.format_float(qty)} {name}" for name, qty in inputs.items()])
+            output_str = ", ".join([f"{self.format_float(qty)} {name}" for name, qty in outputs.items()])
+            print(f"  {i+1}. {input_str} -> {output_str}")
+
+    def display_inventory(self, inventory: Dict[str, float]):
+        """Displays the current inventory."""
+        print("\n--- Current Available Resources ---")
+        if not inventory:
+            print("  (None)")
+            return
+        for item, amount in sorted(inventory.items()):
+            if amount > EPSILON:
+                print(f"  {item}: {self.format_float(amount)}")
