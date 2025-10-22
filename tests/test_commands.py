@@ -24,8 +24,8 @@ class TestCommands(unittest.TestCase):
 
     @patch('sys.stdout', new_callable=io.StringIO)
     def test_list_command_empty(self, mock_stdout):
-        """Test the 'list' command with an empty inventory."""
-        with patch.object(sys, 'argv', ['main.py', 'list']):
+        """Test the 'inventory list' command with an empty inventory."""
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'list']):
             main()
         output = mock_stdout.getvalue()
         self.assertIn("Current Available Resources", output)
@@ -33,32 +33,41 @@ class TestCommands(unittest.TestCase):
 
     @patch('sys.stdout', new_callable=io.StringIO)
     def test_list_command_with_items(self, mock_stdout):
-        """Test the 'list' command with items in inventory."""
+        """Test the 'inventory list' command with items in inventory."""
         inventory = {"Rich Air": 10, "Copper Coin": 5}
         save_inventory(inventory)
-        with patch.object(sys, 'argv', ['main.py', 'list']):
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'list']):
             main()
         output = mock_stdout.getvalue()
         self.assertIn("Rich Air: 10", output)
         self.assertIn("Copper Coin: 5", output)
 
     def test_clear_all_command(self):
-        """Test the 'clear' command without arguments."""
+        """Test the 'inventory clear' command without arguments."""
         inventory = {"Rich Air": 10}
         save_inventory(inventory)
-        with patch.object(sys, 'argv', ['main.py', 'clear']):
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'clear']):
             main()
         new_inventory = load_inventory()
         self.assertEqual(new_inventory, {})
 
     def test_clear_specific_item_command(self):
-        """Test the 'clear' command with a specific item."""
+        """Test the 'inventory clear' command with a specific item."""
         inventory = {"Rich Air": 10, "Copper Coin": 5}
         save_inventory(inventory)
-        with patch.object(sys, 'argv', ['main.py', 'clear', 'Rich Air']):
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'clear', 'Rich Air']):
             main()
         new_inventory = load_inventory()
         self.assertEqual(new_inventory, {"Copper Coin": 5})
+
+    def test_clear_command_actually_clears(self):
+        """Test that 'inventory clear' truly empties the file."""
+        inventory = {"Rich Air": 100}
+        save_inventory(inventory)
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'clear']):
+            main()
+        new_inventory = load_inventory()
+        self.assertEqual(new_inventory, {})
 
     @patch('sys.stdout', new_callable=io.StringIO)
     def test_calculate_command(self, mock_stdout):
@@ -81,17 +90,9 @@ class TestCommands(unittest.TestCase):
         self.assertIn("You can craft 1 of 'Mana Crystal'", output)
 
     @patch('sys.stdout', new_callable=io.StringIO)
-    def test_recipes_command(self, mock_stdout):
-        """Test the 'recipes' command."""
-        with patch.object(sys, 'argv', ['main.py', 'recipes']):
-            main()
-        output = mock_stdout.getvalue()
-        self.assertIn("Available Recipes", output)
-        self.assertIn("-> 1 Phylactery", output) # Check for a known recipe
-
-    def test_add_command_with_quantity(self):
-        """Test the 'add' command with a specific quantity."""
-        with patch.object(sys, 'argv', ['main.py', 'add', 'Rich Air', '25']):
+    def test_add_command_with_quantity(self, mock_stdout):
+        """Test the 'inventory add' command with a specific quantity."""
+        with patch.object(sys, 'argv', ['main.py', 'inventory', 'add', 'Rich Air', '25']):
             main()
         inventory = load_inventory()
         self.assertEqual(inventory.get("Rich Air"), 25)

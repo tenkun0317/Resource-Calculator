@@ -1,8 +1,12 @@
 import unittest
 import os
+from unittest.mock import patch
+import io
+import sys
 
 from recipe_manager import RecipeManager
 from reverse_calculator import reverse_calculate
+from main import main
 
 class TestReverseCalculator(unittest.TestCase):
 
@@ -50,3 +54,21 @@ class TestReverseCalculator(unittest.TestCase):
         result = reverse_calculate(self.recipe_manager, inventory)
         self.assertIn("Pure Mana Gem", result)
         self.assertAlmostEqual(result["Pure Mana Gem"], 1)
+
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_reverse_from_option(self, mock_stdout):
+        """Test the 'reverse --from' command."""
+        with patch.object(sys, 'argv', ['main.py', 'reverse', '--from', 'Rich Air,4']):
+            main()
+        output = mock_stdout.getvalue()
+        self.assertIn("Mana Crystal: 2", output)
+
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_reverse_missing_resources(self, mock_stdout):
+        """Test the 'reverse' command for an uncraftable item to see missing resources."""
+        with patch.object(sys, 'argv', ['main.py', 'reverse', 'Pure Mana Gem']):
+            main()
+        output = mock_stdout.getvalue()
+        self.assertIn("Cannot craft 'Pure Mana Gem'", output)
+        self.assertIn("Missing base resources:", output)
+        self.assertIn("Rich Air", output)

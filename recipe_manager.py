@@ -12,7 +12,8 @@ class RouteInfo(TypedDict):
 class RecipeManager:
     """Manages loading, caching, and accessing recipe data."""
     def __init__(self, file_path: str):
-        self.recipes = self._load_recipes_from_json(file_path)
+        self.file_path = file_path
+        self.recipes = self._load_recipes_from_json(self.file_path)
         self._all_items_cache: Optional[List[str]] = None
         self._base_resources_cache: Optional[Set[str]] = None
 
@@ -21,14 +22,32 @@ class RecipeManager:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            # Convert list of {"inputs": {...}, "outputs": {...}} to list of (inputs, outputs)
             return [(item['inputs'], item['outputs']) for item in data]
-        except FileNotFoundError:
-            print(f"Error: Recipe file not found at '{file_path}'")
+        except (FileNotFoundError, json.JSONDecodeError):
             return []
-        except json.JSONDecodeError:
-            print(f"Error: Could not decode JSON from '{file_path}'")
-            return []
+
+    def save_recipes(self):
+        """Saves the current recipes back to the JSON file."""
+        with open(self.file_path, 'w', encoding='utf-8') as f:
+            data_to_save = [{'inputs': inputs, 'outputs': outputs} for inputs, outputs in self.recipes]
+            json.dump(data_to_save, f, indent=2, sort_keys=True)
+
+    def add_recipe(self, inputs: Dict[str, float], outputs: Dict[str, float]):
+        """Adds a new recipe to the list and saves."""
+        self.recipes.append((inputs, outputs))
+        self.save_recipes()
+        self._all_items_cache = None # Invalidate cache
+        self._base_resources_cache = None
+
+    def delete_recipe(self, index: int):
+        """Deletes a recipe by its index (1-based) and saves."""
+        if 0 <= index < len(self.recipes):
+            self.recipes.pop(index)
+            self.save_recipes()
+            self._all_items_cache = None # Invalidate cache
+            self._base_resources_cache = None
+        else:
+            raise IndexError("Recipe index out of range.")
 
     def get_all_items(self) -> List[str]:
         """Returns a sorted list of all unique items mentioned in recipes."""

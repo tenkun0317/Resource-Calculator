@@ -56,7 +56,7 @@ class ResourceCalculator:
         aggregated_intermediates: defaultdict[str, float] = defaultdict(float) # Tracks items crafted and consumed as part of a larger recipe
         tree_roots: List[Node] = []
 
-        current_overall_available_resources: Dict[str, float] = deepcopy(available_resources)
+        current_overall_available_resources: Dict[str, float] = available_resources
         for item_name, item_qty in items:
             inputs_for_item, outputs_for_item, _, resources_after_item_calc, top_node, intermediates_for_item = self._resolve_item(
                 item_name, item_qty, current_overall_available_resources,
@@ -163,12 +163,11 @@ class ResourceCalculator:
 
     def _use_from_stock(self, item: str, qty: float, available: Dict[str, float], node: Node, depth: int) -> Tuple[float, Dict[str, float]]:
         """Checks for and uses available items from stock."""
-        available_after_use = deepcopy(available)
         available_in_stock = available.get(item, 0)
         used_from_stock = min(available_in_stock, qty)
 
         if used_from_stock > EPSILON:
-            available_after_use[item] -= used_from_stock
+            available[item] -= used_from_stock
             qty -= used_from_stock
 
             stock_node = Node(item, used_from_stock, depth + 1)
@@ -177,7 +176,7 @@ class ResourceCalculator:
             node.add_child(stock_node)
             node.produced += used_from_stock
         
-        return qty, available_after_use
+        return qty, available
 
     def _find_best_route(self, item: str, qty: float, available_resources: Dict[str, float], processing: Set[str], dependency_chain: List[str], depth: int) -> Optional[RouteEvaluation]:
         possible_routes = self.recipe_manager.find_recipes_for(item)
@@ -211,7 +210,7 @@ class ResourceCalculator:
 
         recipe_output_qty_per_run = recipe_outputs_template[item]
         scale_factor = math.ceil(qty / recipe_output_qty_per_run)
-        current_resources_for_this_route = deepcopy(available_resources)
+        current_resources_for_this_route = available_resources
 
         for input_item, input_qty_per_recipe in recipe_inputs_template.items():
             required_qty_for_input_item = input_qty_per_recipe * scale_factor

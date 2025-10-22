@@ -66,6 +66,15 @@ def handle_clear(args, inventory: Dict[str, float]):
 
 def handle_reverse(args, recipe_manager: RecipeManager, inventory: Dict[str, float]):
     view = ConsoleView()
+    
+    # If --from is used, parse it and override the current inventory for this command
+    if args.from_items:
+        try:
+            inventory = {k: float(v) for k, v in (item.split(',') for item in args.from_items.split(';'))}
+        except ValueError:
+            print("Error: Invalid format for --from. Expected 'Item1,qty1;Item2,qty2'")
+            return
+
     if args.item_name:
         item_name = args.item_name
         all_items = recipe_manager.get_all_items()
@@ -78,9 +87,18 @@ def handle_reverse(args, recipe_manager: RecipeManager, inventory: Dict[str, flo
             else:
                 raise CalculatorError(f"Item '{item_name}' is not a valid item.")
 
-        max_craftable = get_max_craftable_single_item(item_name, inventory, recipe_manager, {})
+        max_craftable, missing = get_max_craftable_single_item(item_name, inventory, recipe_manager, {})
         craftable_amount = max_craftable - inventory.get(item_name, 0)
-        print(f"You can craft {view.format_float(craftable_amount)} of '{item_name}' with your current resources.")
+
+        if craftable_amount >= 1 - 1e-9:
+            print(f"You can craft {view.format_float(craftable_amount)} of '{item_name}' with the given resources.")
+        else:
+            print(f"Cannot craft '{item_name}'.")
+            if missing:
+                print("Missing base resources:")
+                for item, qty in missing.items():
+                    print(f"  {item}: {view.format_float(qty)}")
+
     else:
         craftable_items = reverse_calculate(recipe_manager, inventory)
         view.display_reverse_calculation(craftable_items)
@@ -89,16 +107,58 @@ def handle_list(inventory: Dict[str, float]):
     view = ConsoleView()
     view.display_inventory(inventory)
 
-def handle_recipes(recipe_manager: RecipeManager):
+def handle_recipe_list(recipe_manager: RecipeManager):
     view = ConsoleView()
     view.display_recipes(recipe_manager.recipes)
 
+def parse_recipe_string(recipe_str: str) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """Parses a recipe string like 'in1,1;in2,2 -> out1,1' into input and output dicts."""
+    try:
+        inputs_str, outputs_str = recipe_str.split('->')
+        
+        def parse_part(part_str: str) -> Dict[str, float]:
+            items = {}
+            if not part_str.strip():
+                return items
+            for item_part in part_str.split(';'):
+                parts = [p.strip() for p in item_part.split(',')]
+                item_name = parts[0]
+                qty = 1.0 if len(parts) == 1 else float(parts[1])
+                items[item_name] = qty
+            return items
+
+        inputs = parse_part(inputs_str)
+        outputs = parse_part(outputs_str)
+        if not outputs:
+            raise ValueError("Recipe must have at least one output.")
+        return inputs, outputs
+
+    except ValueError as e:
+        raise CalculatorError(f"Invalid recipe format. Expected 'inputs -> outputs'. Error: {e}")
+
+def handle_recipe_add(args, recipe_manager: RecipeManager):
+    try:
+        inputs, outputs = parse_recipe_string(args.recipe_string)
+        recipe_manager.add_recipe(inputs, outputs)
+        print("Recipe added successfully.")
+        handle_recipe_list(recipe_manager)
+    except CalculatorError as e:
+        print(f"Error: {e}")
+
+def handle_recipe_delete(args, recipe_manager: RecipeManager):
+    try:
+        # argparse provides 1-based index, convert to 0-based
+        recipe_manager.delete_recipe(args.index - 1)
+        print(f"Recipe at index {args.index} deleted successfully.")
+        handle_recipe_list(recipe_manager)
+    except (IndexError, CalculatorError) as e:
+        print(f"Error: {e}")
+
 def handle_help(parser: argparse.ArgumentParser, subparsers):
-    """Display a formatted help message with improved layout."""
     print(parser.format_help())
-    # for command, sub_parser in subparsers.choices.items():
-    #     print(f"--- {command} ---")
-    #     print(sub_parser.format_help())
+    for command, sub_parser in subparsers.choices.items():
+        print(f"--- {command} ---")
+        print(sub_parser.format_help())
 
 def start_interactive_mode(parser: argparse.ArgumentParser, subparsers):
     """Starts the interactive command loop."""
@@ -135,16 +195,22 @@ def dispatch_command(args, recipe_manager, inventory, parser, subparsers):
         else:
             view = ConsoleView()
             view.display_available_items_for_calculation(recipe_manager.get_all_items())
-    elif args.command == 'add':
-        handle_add(args, recipe_manager, inventory)
-    elif args.command == 'clear':
-        handle_clear(args, inventory)
+    elif args.command == 'inventory':
+        if args.inv_command == 'add':
+            handle_add(args, recipe_manager, inventory)
+        elif args.inv_command == 'clear':
+            handle_clear(args, inventory)
+        elif args.inv_command == 'list':
+            handle_list(inventory)
     elif args.command == 'reverse':
         handle_reverse(args, recipe_manager, inventory)
-    elif args.command == 'list':
-        handle_list(inventory)
-    elif args.command == 'recipes':
-        handle_recipes(recipe_manager)
+    elif args.command == 'recipe':
+        if args.recipe_command == 'list':
+            handle_recipe_list(recipe_manager)
+        elif args.recipe_command == 'add':
+            handle_recipe_add(args, recipe_manager)
+        elif args.recipe_command == 'delete':
+            handle_recipe_delete(args, recipe_manager)
     elif args.command == 'help':
         handle_help(parser, subparsers)
     elif args.command == 'interactive':
@@ -159,30 +225,35 @@ def main() -> None:
     calc_parser.add_argument('item_name', type=str, nargs='?', help='The name of the item to calculate.')
     calc_parser.add_argument('quantity', type=float, nargs='?', default=1.0, help='The quantity to calculate. Defaults to 1.')
 
-    # Add command
-    add_parser = subparsers.add_parser('add', help='Add an item to your available resources.')
-    add_parser.add_argument('item_name', type=str, help='The name of the item to add.')
-    add_parser.add_argument('quantity', type=float, nargs='?', default=1.0, help='The quantity to add. Defaults to 1.')
-
-    # Clear command
-    clear_parser = subparsers.add_parser('clear', help='Clear all or a specific item from available resources.')
-    clear_parser.add_argument('item_name', type=str, nargs='?', help='Optional: a specific item to remove.')
+    # Inventory command group
+    inv_parser = subparsers.add_parser('inventory', help='Manage your available resources (inventory).')
+    inv_subparsers = inv_parser.add_subparsers(dest='inv_command', required=True)
+    inv_add_parser = inv_subparsers.add_parser('add', help='Add an item to your inventory.')
+    inv_add_parser.add_argument('item_name', type=str, help='The name of the item to add.')
+    inv_add_parser.add_argument('quantity', type=float, nargs='?', default=1.0, help='The quantity to add. Defaults to 1.')
+    inv_clear_parser = inv_subparsers.add_parser('clear', help='Clear all or a specific item from inventory.')
+    inv_clear_parser.add_argument('item_name', type=str, nargs='?', help='Optional: a specific item to remove.')
+    inv_list_parser = inv_subparsers.add_parser('list', help='List all items in your inventory.')
 
     # Reverse command
     reverse_parser = subparsers.add_parser('reverse', help='Show what can be crafted from available resources.')
     reverse_parser.add_argument('item_name', type=str, nargs='?', help='Optional: a specific item to check.')
+    reverse_parser.add_argument('--from', dest='from_items', type=str, help='Use a temporary inventory specified in the format "Item1,qty1;Item2,qty2"')
 
-    # List command
-    list_parser = subparsers.add_parser('list', help='List all items in your available resources.')
-
-    # Recipes command
-    recipes_parser = subparsers.add_parser('recipes', help='List all available recipes.')
+    # Recipe command group
+    recipe_parser = subparsers.add_parser('recipe', help='Manage recipes.')
+    recipe_subparsers = recipe_parser.add_subparsers(dest='recipe_command', required=True)
+    recipe_subparsers.add_parser('list', help='List all available recipes.')
+    recipe_add_parser = recipe_subparsers.add_parser('add', help='Add a new recipe. Format: "in1,qty;in2,qty->out1,qty"')
+    recipe_add_parser.add_argument('recipe_string', type=str)
+    recipe_delete_parser = recipe_subparsers.add_parser('delete', help='Delete a recipe by its index (from \'recipes list\').')
+    recipe_delete_parser.add_argument('index', type=int)
 
     # Help command
-    help_parser = subparsers.add_parser('help', help='Show detailed help for all commands.')
+    subparsers.add_parser('help', help='Show detailed help for all commands.')
 
     # Interactive command
-    interactive_parser = subparsers.add_parser('interactive', help='Enter interactive mode.')
+    subparsers.add_parser('interactive', help='Enter interactive mode.')
 
     # If no command is given, it defaults to help
     if len(sys.argv) == 1:

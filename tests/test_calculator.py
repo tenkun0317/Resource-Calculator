@@ -74,6 +74,7 @@ class TestResourceCalculator(unittest.TestCase):
         self.assertEqual(categorized_prods.get("finished"), {"Mana Dust": 2})
         
         # The byproducts should appear in the final_available resources.
+        print(f"Final available for byproducts test: {final_available}")
         self.assertIn("Liquid Curse", final_available)
         self.assertIn("Silica Powder", final_available)
         self.assertAlmostEqual(final_available["Liquid Curse"], 1.0)
